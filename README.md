@@ -22,7 +22,6 @@ CLAUDE.md     # 스키마와 워크플로우
 - `entities/` — 사람, 팀, 조직, 제품
 - `concepts/` — 패턴, 방법론, 기술 용어, 이론
 - `sources/` — 인제스트된 원본 소스별 요약 페이지
-- `work-items/` — Jira 티켓, GitHub 이슈/PR 등
 - `synthesis/` — 쿼리에서 도출된 교차 소스 페이지
 - `synthesis/daily/` — 하루 단위 다이제스트
 - `index.md`, `overview.md`, `log.md` — 카탈로그, 스냅샷, 히스토리
@@ -36,7 +35,7 @@ CLAUDE.md     # 스키마와 워크플로우
 | 서브커맨드 | 용도 |
 |---|---|
 | `build [scenario]` | 현재 디렉토리에 위키 구조 부트스트랩 |
-| `ingest <path>` | 새 소스를 읽어 위키에 통합 |
+| `ingest [path]` | `raw/` 안의 소스를 읽어 위키에 통합 (경로 생략 시 `raw/` 전체 처리) |
 | `query <question>` | 위키 내용으로 답변 (인용 포함) |
 | `daily [date]` | 하루치 raw 입력을 다이제스트로 합성 |
 | `lint` | 모순·고아 페이지·누락 헬스체크 |
@@ -45,8 +44,8 @@ CLAUDE.md     # 스키마와 워크플로우
 ## 빠른 시작
 
 1. 위키를 둘 디렉토리에서 `/llm-wiki build` 실행. 시나리오(research, reading, personal, business, general) 선택 후 `purpose.md` 채우기.
-2. `raw/`에 소스 파일 하나 떨어뜨리기.
-3. `/llm-wiki ingest raw/<file>` 실행. Claude가 분석 후 3-5개 요점을 함께 논의하고 위키 페이지를 작성합니다.
+2. `raw/`에 소스 파일을 떨어뜨리기 (여러 개 가능).
+3. `/llm-wiki ingest` 실행 — `raw/` 안의 모든 파일을 훑어 위키에 통합합니다. 특정 파일만 처리하려면 `/llm-wiki ingest raw/<file>`. SHA256 해시로 이미 인제스트된 파일은 자동 스킵하며, 각 파일마다 분석 → 3-5개 요점 논의 → 작성 순으로 진행됩니다.
 4. `/llm-wiki query <question>`으로 질문. 답변에는 위키 페이지와 원본 파일이 인용됩니다.
 5. 하루 끝에 `/llm-wiki daily`로 그 날의 raw를 하나의 다이제스트로 압축.
 6. 주기적으로 `/llm-wiki lint`를 돌려 모순·고아 페이지·공백 영역을 점검.
@@ -79,4 +78,5 @@ CLAUDE.md     # 스키마와 워크플로우
 ## 참고
 
 - 전체 스킬 명세: [`.claude/llm-wiki/SKILL.md`](.claude/llm-wiki/SKILL.md)
+- 다른 언어: [English](README_en.md) / [日本語](README_jp.md)
 - 원본 gist: [karpathy/llm-wiki.md](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)

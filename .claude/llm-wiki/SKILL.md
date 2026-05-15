@@ -16,7 +16,7 @@ The skill is invoked as `/llm-wiki <subcommand> [args]`:
 | Subcommand | Purpose |
 |---|---|
 | `build [scenario]` | Bootstrap wiki structure in current directory |
-| `ingest <path>` | Read a new source and integrate it into the wiki |
+| `ingest [path]` | Read a source (or all of `raw/` when path omitted) and integrate into the wiki |
 | `query <question>` | Answer using wiki content, with citations |
 | `daily [date]` | Build a daily synthesis from a day's raw inputs |
 | `lint` | Health-check the wiki for contradictions, orphans, gaps |
@@ -50,19 +50,18 @@ Sets up the three-layer architecture in the current working directory.
    wiki/entities/          # people, teams, organizations, products
    wiki/concepts/          # patterns, methods, technical terms, theories
    wiki/sources/           # one summary page per ingested raw source
-   wiki/work-items/        # Jira tickets, GitHub issues/PRs, other tracked work
    wiki/synthesis/         # synthesized pages from queries
    wiki/synthesis/daily/   # one digest page per day
    purpose.md              # WHY this wiki exists — goals, key questions, thesis
    CLAUDE.md               # the schema — conventions and workflows
    ```
-   Pre-create the empty `entities/`, `concepts/`, `sources/`, and `work-items/` directories at build time. Fixing the namespace upfront prevents ingest from inventing buckets ad hoc (e.g. filing Jira tickets under `entities/`).
+   Pre-create the empty `entities/`, `concepts/`, and `sources/` directories at build time. Fixing the namespace upfront prevents ingest from inventing buckets ad hoc.
 4. **Populate `purpose.md`.** Have a short conversation to fill in: domain, primary questions, scope, success criteria. Keep it 1-2 screens of markdown.
 5. **Populate `CLAUDE.md`** with the schema (see template below).
-6. **Seed `index.md`** as an empty catalog with sections (Entities, Concepts, Sources, Work Items, Synthesis, Daily).
+6. **Seed `index.md`** as an empty catalog with sections (Entities, Concepts, Sources, Synthesis, Daily).
 7. **Seed `overview.md`** with a placeholder section structure: `## Current Scope`, `## Major Threads`, `## Open Questions`. These will be filled as ingests happen.
 8. **Seed `log.md`** with a `## [YYYY-MM-DD] init` entry.
-9. **Tell the user the next step:** drop a source into `raw/` and run `/llm-wiki ingest <path>`.
+9. **Tell the user the next step:** drop one or more sources into `raw/`, then run `/llm-wiki ingest` to process everything (or `/llm-wiki ingest <path>` for a specific file).
 
 ### `CLAUDE.md` schema template
 
@@ -78,13 +77,13 @@ Sets up the three-layer architecture in the current working directory.
 ## Page conventions
 - Every page has YAML frontmatter:
   - `title`
-  - `type` (entity|concept|source|work-item|synthesis)
+  - `type` (entity|concept|source|synthesis)
   - `created`
   - `updated`
   - `sources` — list of `raw/...` paths that contributed to this page. **Required on every page, not just source pages.** Entity and concept pages accumulate this list across ingests.
   - For source pages only: `sha256` — content hash of the raw file at ingest time, used to skip unchanged re-ingests.
 - Cross-references use `[[wikilink]]` syntax (Obsidian compatible).
-- One page per entity / concept / source / work-item. Don't merge unrelated topics.
+- One page per entity / concept / source. Don't merge unrelated topics.
 - Page filenames are kebab-case: `wiki/concepts/vector-embeddings.md`.
 - Daily digests live under `wiki/synthesis/daily/<YYYY-MM-DD>.md`, kept separate from durable synthesis pages.
 
@@ -92,16 +91,17 @@ Sets up the three-layer architecture in the current working directory.
 - **`wiki/entities/`** — proper nouns with continuity: people, teams, organizations, products, services. Filename = canonical name slug (e.g. `payment-platform-team.md`).
 - **`wiki/concepts/`** — reusable ideas: patterns, methods, architectures, technical terms, theories. Filename = the concept (e.g. `circuit-breaker.md`).
 - **`wiki/sources/`** — one summary page per ingested raw file. Filename = source slug (e.g. `2026-05-02-design-doc.md`).
-- **`wiki/work-items/`** — Jira tickets, GitHub issues/PRs, support tickets — anything with a tracker ID and a lifecycle. Filename = the ID, lowercased (e.g. `pay-1234.md`, `gh-567.md`). Link the people who own them via `[[entity]]` and the concepts they touch via `[[concept]]`.
 - **`wiki/synthesis/`** — cross-source pages produced from `query` or promoted decisions.
 
-A Jira ticket is **not** an entity. An entity is a thing that persists across many tickets. Conflating them collapses the graph.
-
 ## Ingest workflow (two-step chain-of-thought)
-1. Read the source in raw/. Compute its SHA256 hash; if a `wiki/sources/<slug>.md` already exists with the same `sha256`, skip with a notice.
+
+**Target resolution:** If a path was given, the target is that single file. If no path was given, walk every file under `raw/` (excluding `raw/assets/`) in lexicographic order and treat each as a target. Steps 1-5 run **per file**; steps 6-7 run **once at the end**.
+
+Per file:
+1. Read the source in raw/. Compute its SHA256 hash; if a `wiki/sources/<slug>.md` already exists with the same `sha256`, skip with a notice and move to the next target.
 2. **Step 1 — Analysis (no writes yet).** Produce a structured analysis note in chat:
    - Key entities, concepts, arguments, claims
-   - Mapping of each item to its target bucket (entity / concept / work-item)
+   - Mapping of each item to its target bucket (entity / concept)
    - Connections to existing wiki pages (read `wiki/index.md` and relevant pages)
    - **Contradictions & tensions** with existing claims — explicit list
    - Recommended new pages vs. updates to existing pages
@@ -109,13 +109,16 @@ A Jira ticket is **not** an entity. An entity is a thing that persists across ma
 3. Discuss key takeaways with the user (3-5 bullets). User can steer emphasis before writes.
 4. **Step 2 — Generation.** Using the analysis as input, write/update pages:
    - `wiki/sources/<source-slug>.md` (summary + key claims + citations + `sha256` + `sources: [raw/...]`)
-   - Each touched entity / concept / work-item page, with `sources[]` extended to include this raw file
+   - Each touched entity / concept page, with `sources[]` extended to include this raw file
    - Cross-references in both directions
    - Contradictions surfaced as `> [!warning] Contradicts ...` callouts on the older page (never overwrite silently)
    - Pre-generated web search queries for any item flagged as needing external research, stored inline in the source page under `## Review queue`
-5. Update `wiki/index.md` with new entries.
-6. Update `wiki/overview.md`: refresh the global summary (current scope, major threads, open questions) based on the new state. Keep it short — one screen.
-7. Append `## [YYYY-MM-DD] ingest | <source title>` to `wiki/log.md`.
+5. Append `## [YYYY-MM-DD] ingest | <source title>` to `wiki/log.md` (one entry per file).
+
+Once at the end (after all files processed):
+
+6. Update `wiki/index.md` with all new entries.
+7. Update `wiki/overview.md`: refresh the global summary (current scope, major threads, open questions) based on the new state. Keep it short — one screen.
 
 ## Query workflow (4-signal candidate selection)
 1. Read `wiki/index.md` and `wiki/overview.md` first to find candidate pages.
@@ -157,45 +160,61 @@ Suggest new questions or sources rather than auto-fixing.
 
 ---
 
-## `ingest <path>` — Process a source
+## `ingest [path]` — Process one source or all of `raw/`
 
-`<path>` points to a file in `raw/` (or to be moved into `raw/`).
+- `<path>` given → process that single file. If the path is outside `raw/`, ask whether to copy or move it in (sources must live in `raw/` to be tracked).
+- `<path>` omitted → walk every file under `raw/` (excluding `raw/assets/`) and process them sequentially. This is the batch mode.
 
-**Steps:**
+**Pre-flight (batch mode only):**
 
-1. If the path is outside `raw/`, ask whether to copy or move it in. Sources must live in `raw/` to be tracked.
-2. **Hash check.** Compute SHA256 of the raw file (`shasum -a 256 <path>` or equivalent). If `wiki/sources/<slug>.md` already exists with the same `sha256` in its frontmatter, report "unchanged, skipping" and stop. The user can pass `--force` to override.
-3. Read the source. For PDFs, extract text. For images, describe them factually.
-4. **Step 1 — Analysis (no writes).** Read `purpose.md` and `wiki/index.md` (and `wiki/overview.md` if it exists), then produce a structured analysis note in chat covering:
-   - **Key items:** entities, concepts, arguments, claims, work-item IDs
-   - **Bucket routing:** for each item, which folder it belongs in (entity / concept / work-item)
+Before step 1, enumerate the candidate file list and report:
+
+```
+Found N files under raw/. Hash-checking…
+  K unchanged (will skip)
+  M new or modified (will ingest)
+```
+
+Then loop steps 1-9 below per target file. Steps 10-13 (index/overview/log/report) run **once at the end** of the loop, not per file. The user can interrupt between files at any time.
+
+**Per-file steps (1-8 — repeat for each target):**
+
+1. **Hash check.** Compute SHA256 of the raw file (`shasum -a 256 <path>` or equivalent). If `wiki/sources/<slug>.md` already exists with the same `sha256` in its frontmatter, report "unchanged, skipping" and move to the next file. The user can pass `--force` to override.
+2. Read the source. For PDFs, extract text. For images, describe them factually.
+3. **Step 1 — Analysis (no writes).** Read `purpose.md` and `wiki/index.md` (and `wiki/overview.md` if it exists), then produce a structured analysis note in chat covering:
+   - **Key items:** entities, concepts, arguments, claims
+   - **Bucket routing:** for each item, which folder it belongs in (entity / concept)
    - **Existing connections:** which current wiki pages relate, via what
    - **Contradictions & tensions:** explicit list of claims that disagree with existing pages
    - **Page plan:** which pages to create new, which to update, which `sources[]` arrays to extend
    - **Folder hint:** note the raw file's parent directory as a classification signal (e.g. `raw/papers/energy/foo.pdf` → bias toward energy-related concept routing)
-5. **Discuss key takeaways with the user (3-5 bullets).** Don't skip — this is the steering point.
-6. **Step 2 — Generation.** Write `wiki/sources/<slug>.md` with:
+4. **Discuss key takeaways with the user (3-5 bullets).** Don't skip — this is the steering point. In batch mode, this happens per file; the user can say "그대로 진행" / "looks good" to greenlight the rest in a single response.
+5. **Step 2 — Generation.** Write `wiki/sources/<slug>.md` with:
    - frontmatter: `type: source`, `title`, `created`, `updated`, `sources: [raw/...]`, `sha256: <hash>`
    - 3-paragraph summary
    - Key claims (each with citation back to raw section/page)
    - `## Review queue` section listing items flagged for human judgment, each with a pre-generated web search query suggestion
-7. For each item touched: create or update its page in the right bucket. Aim for 5-15 pages touched per ingest. Routing rules:
-   - **Jira ticket / GitHub issue / GitHub PR / support ticket** → `wiki/work-items/<id>.md`
+6. For each item touched: create or update its page in the right bucket. Aim for 5-15 pages touched per ingest. Routing rules:
    - **Person, team, organization, product, service** → `wiki/entities/<slug>.md`
    - **Pattern, method, architecture, technical term, theory** → `wiki/concepts/<slug>.md`
-   - **Source summary** → `wiki/sources/<slug>.md` (covered in step 6)
+   - **Source summary** → `wiki/sources/<slug>.md` (covered in step 5)
 
    Every page (not just source pages) must carry `sources: []` in frontmatter. When updating an existing entity/concept page, append this raw path to its `sources[]` if not already present. This is what makes `delete` and the source-overlap query signal work.
+7. Add `[[wikilink]]` cross-references in both directions.
+8. If a new claim contradicts an existing one (already surfaced in step 3 analysis), add a `> [!warning]` callout on the older page pointing to the new source. Do NOT silently overwrite.
+9. Append to `wiki/log.md`: `## [YYYY-MM-DD] ingest | <title> | touched: N pages` — one entry **per file**, so individual ingests stay greppable.
 
-   When in doubt: does this thing have a tracker ID and a lifecycle (open/closed)? → work-item. Does it persist across many tickets/sources? → entity or concept.
-8. Add `[[wikilink]]` cross-references in both directions.
-9. If a new claim contradicts an existing one (already surfaced in step 4 analysis), add a `> [!warning]` callout on the older page pointing to the new source. Do NOT silently overwrite.
-10. Update `wiki/index.md`.
+**End-of-loop steps (run once after all files are processed):**
+
+10. Update `wiki/index.md` with all new entries.
 11. **Update `wiki/overview.md`.** Refresh `## Current Scope`, `## Major Threads`, `## Open Questions` to reflect the new state. Keep it ≤1 screen — overview is a snapshot, not an accumulator.
-12. Append to `wiki/log.md`: `## [YYYY-MM-DD] ingest | <title> | touched: N pages`.
-13. Report back: which pages were created, which updated, any contradictions flagged, any review-queue items with pre-generated search queries.
+12. Final report: total files processed / skipped (unchanged hash), pages created vs updated, contradictions flagged, review-queue items with pre-generated search queries. In batch mode this is the summary across all files.
 
-**Stay involved.** Prefer one source at a time over batch ingestion unless the user explicitly asks for batch.
+**Batch mode notes:**
+
+- Process files in a stable order (lexicographic by path) so re-runs are deterministic.
+- If a single file's analysis fails (parse error, unreadable PDF), report it, skip to the next, and include the failure list in the final report. One bad file shouldn't block the rest.
+- The per-file takeaway discussion is the **minimum guaranteed human curation point**. Don't elide it to "save a turn" — that's where contradictions get caught and bucket routing gets right.
 
 ---
 
@@ -292,7 +311,7 @@ Remove a raw source and clean up the wiki without losing shared knowledge. Use w
 1. **Confirm.** Show the file path and ask: "Delete this source and cascade-clean? (y/n)".
 2. **Find affected pages.** Locate:
    - `wiki/sources/<slug>.md` matching this raw file
-   - Every wiki page (entity/concept/work-item/synthesis) whose frontmatter `sources[]` includes this raw path
+   - Every wiki page (entity/concept/synthesis) whose frontmatter `sources[]` includes this raw path
 3. **For each affected page, decide:**
    - **Delete the page** if removing this entry would leave `sources[]` empty AND the page has no inbound `[[wikilinks]]` from other still-present pages. The page existed only because of this source.
    - **Trim** if `sources[]` still has other entries after removal, OR if other pages link to it. Remove just the one entry from `sources[]`; keep the page.
